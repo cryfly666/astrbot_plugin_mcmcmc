@@ -415,7 +415,7 @@ class MyPlugin(Star):
                     # 构建最终消息
                     final_message = f"{change_notification}\n\n📊 当前状态：\n{full_status}"
                     if hitokoto:
-                        final_message += f"\n\n\n💬 {hitokoto}"
+                        final_message += f"\n\n💬 {hitokoto}"
                     
                     # 使用抽象的通知函数发送消息
                     await self.notify_subscribers(final_message)
@@ -463,7 +463,7 @@ class MyPlugin(Star):
         # 获取一言句子
         hitokoto = await self.get_hitokoto()
         if hitokoto:
-            server_info += f"\n\n\n💬 {hitokoto}"
+            server_info += f"\n \n💬 {hitokoto}"
         
         yield event.plain_result(server_info)
     
