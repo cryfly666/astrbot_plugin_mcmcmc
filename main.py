@@ -29,6 +29,7 @@ class MyPlugin(Star):
         self.server_name = self.config.get("server_name", "Minecraft服务器")
         self.server_ip = self.config.get("server_ip")
         self.server_port = self.config.get("server_port")
+        self.server_type = self.config.get("server_type", "be")  # 添加服务器类型配置，默认为基岩版(be)
         self.check_interval = self.config.get("check_interval", 10)
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
         
@@ -43,7 +44,7 @@ class MyPlugin(Star):
             logger.error("请在配置文件中设置以下参数: target_group, server_ip, server_port")
             self.enable_auto_monitor = False
         else:
-            logger.info(f"Minecraft监控插件已加载 - 目标群: {self.target_group}, 服务器: {self.server_ip}:{self.server_port}")
+            logger.info(f"Minecraft监控插件已加载 - 目标群: {self.target_group}, 服务器: {self.server_ip}:{self.server_port}, 类型: {self.server_type}")
         
         # 如果启用了自动监控且配置完整，延迟启动任务
         if self.enable_auto_monitor:
@@ -94,9 +95,10 @@ class MyPlugin(Star):
             names = []
             for p in player_sample:
                 if isinstance(p, dict):
-                    name = p.get("name") or p.get("username") or p.get("name_clean") or p.get("playername")
+                    # 基岩版API可能使用不同的字段名
+                    name = p.get("name") or p.get("username") or p.get("name_clean") or p.get("playername") or p.get("xuid")
                     if name:
-                        names.append(name)
+                        names.append(str(name))
                 else:
                     names.append(str(p))
             return names
@@ -117,7 +119,7 @@ class MyPlugin(Star):
             return None
         
         try:
-            url = f"https://motd.minebbs.com/api/status?ip={self.server_ip}&port={self.server_port}&stype=je"
+            url = f"https://motd.minebbs.com/api/status?ip={self.server_ip}&port={self.server_port}&stype={self.server_type}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -131,30 +133,81 @@ class MyPlugin(Star):
                         
                         # 根据实际API格式提取服务器信息
                         server_status = data.get('status', '未知')
-                        version = data.get('version', '未知版本')
                         
-                        # 处理玩家信息
+                        # 处理版本信息
+                        version = data.get('version', '未知版本')
+                        # 基岩版API可能返回版本为null或空
+                        if not version or version == 'null':
+                            version = '未知版本'
+                        
+                        # 处理玩家信息 - 基岩版API返回格式可能与Java版不同
                         players_info = data.get('players', {})
+                        
+                        # 基岩版API可能直接返回online和max，也可能是字符串
                         if isinstance(players_info, dict):
-                            online_players = players_info.get('online', 0)
-                            max_players = players_info.get('max', 0)
-                            player_sample = players_info.get('sample')
-                            if not player_sample:
-                                # minebbs 实际返回字段
-                                player_sample = players_info.get('list', [])
-
+                            # 获取玩家数量，确保转换为整数
+                            online_players_raw = players_info.get('online', 0)
+                            max_players_raw = players_info.get('max', 0)
+                            
+                            # 转换为整数，处理可能的字符串或null值
+                            try:
+                                online_players = int(online_players_raw) if online_players_raw else 0
+                            except (ValueError, TypeError):
+                                online_players = 0
+                            
+                            try:
+                                max_players = int(max_players_raw) if max_players_raw else 0
+                            except (ValueError, TypeError):
+                                max_players = 0
+                            
+                            # 基岩版API的玩家列表可能在不同的字段中
+                            player_sample = None
+                            
+                            # 尝试多个可能的字段名来获取玩家列表
+                            possible_player_fields = ['sample', 'list', 'players', 'player_sample', 'online_players']
+                            for field in possible_player_fields:
+                                if field in players_info and players_info[field]:
+                                    player_sample = players_info[field]
+                                    logger.info(f"从字段 '{field}' 获取到玩家列表: {player_sample}")
+                                    break
+                            
+                            # 如果上述字段都没有，检查是否有其他玩家信息格式
+                            if not player_sample and online_players > 0:
+                                # 基岩版API可能直接将玩家信息放在players_info中
+                                if len(players_info) > 2:  # 除了online和max之外还有其他字段
+                                    # 可能是玩家信息以其他格式存储
+                                    for key, value in players_info.items():
+                                        if key not in ['online', 'max'] and isinstance(value, (list, str)):
+                                            player_sample = value
+                                            logger.info(f"从字段 '{key}' 获取到玩家信息: {player_sample}")
+                                            break
                         else:
                             online_players = 0
                             max_players = 0
                             player_sample = []
                         
+                        # 对于基岩版，服务器名称可能来自不同字段
+                        server_name = data.get('hostname', self.server_name)
+                        if not server_name or server_name == 'null':
+                            server_name = self.server_name
+                        
+                        # 处理motd信息
+                        motd = data.get('motd', {})
+                        if isinstance(motd, dict):
+                            motd_text = motd.get('clean', [])
+                            if isinstance(motd_text, list):
+                                motd_text = ' '.join([str(item) for item in motd_text])
+                        else:
+                            motd_text = str(motd) if motd else ''
+                        
                         return {
                             'status': server_status,
-                            'name': self.server_name,
+                            'name': server_name,
                             'version': version,
                             'online': online_players,
                             'max': max_players,
-                            'players': player_sample
+                            'players': player_sample if player_sample is not None else [],
+                            'motd': motd_text
                         }
                     else:
                         logger.warning(f"获取服务器信息失败 (状态码: {response.status})")
@@ -189,15 +242,21 @@ class MyPlugin(Star):
         online_players = server_data['online']
         max_players = server_data['max']
         player_sample = server_data['players']
+        motd = server_data.get('motd', '')
         
         # 构建消息
         status_emoji = "🟢" if server_status == "online" else "🔴"
         message = f"{status_emoji} 服务器: {server_name}\n"
+        
+        # 添加MOTD信息
+        if motd and motd != 'null' and motd != '[]':
+            message += f"📝 MOTD: {motd}\n"
+            
         message += f"🎮 版本: {version}\n"
         message += f"👥 在线玩家: {online_players}/{max_players}"
         
         # 处理玩家列表
-        if online_players > 0 and player_sample:
+        if online_players > 0:
             player_names = self._extract_player_names(player_sample)
             if player_names:
                 display_names = player_names[:10]
@@ -205,9 +264,14 @@ class MyPlugin(Star):
                 if len(player_names) > 10:
                     message += f" (+{len(player_names) - 10}人)"
             else:
-                message += "\n📋 玩家列表: 数据获取中..."
+                # 如果有玩家在线但无法获取列表，显示提示信息
+                message += f"\n📋 当前有 {online_players} 名玩家在线"
         else:
             message += "\n📋 当前无玩家在线"
+        
+        # 添加服务器类型标识
+        server_type_display = "基岩版" if self.server_type == "be" else "Java版"
+        message += f"\n🔧 服务器类型: {server_type_display}"
         
         return message
 
@@ -287,7 +351,7 @@ class MyPlugin(Star):
     
     async def initialize(self):
         """插件初始化方法"""
-        logger.info("Minecraft服务器监控插件已加载，使用 /start_hello 启动定时任务")
+        logger.info("Minecraft服务器监控插件已加载，使用 /start_server_monitor 启动定时任务")
     
     async def notify_subscribers(self, message: str):
         """发送通知到目标群组（抽象的通知函数）"""
@@ -372,12 +436,7 @@ class MyPlugin(Star):
                 # 出错时等待一下再继续
                 await asyncio.sleep(5)
 
-    # 基础指令
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """Hello World 指令"""
-        user_name = event.get_sender_name()
-        yield event.plain_result(f"Hello, {user_name}!")
+
 
     # 定时任务控制指令
     @filter.command("start_server_monitor")
@@ -422,20 +481,7 @@ class MyPlugin(Star):
         logger.info("监控状态缓存已重置")
         yield event.plain_result("✅ 监控状态缓存已重置，下次检测将视为首次检测")
     
-    # 保留旧指令以兼容（作为代理）
-    @filter.command("start_hello")
-    async def start_hello_task(self, event: AstrMessageEvent):
-        """启动定时发送任务（兼容旧版）"""
-        # 直接代理到新方法，正确处理异步生成器
-        async for result in self.start_server_monitor_task(event):
-            yield result
-    
-    @filter.command("stop_hello")
-    async def stop_hello_task(self, event: AstrMessageEvent):
-        """停止定时发送任务（兼容旧版）"""
-        # 直接代理到新方法，正确处理异步生成器
-        async for result in self.stop_server_monitor_task(event):
-            yield result
+
     
     @filter.command("set_group")
     async def set_target_group(self, event: AstrMessageEvent, group_id: str):
@@ -449,44 +495,7 @@ class MyPlugin(Star):
         logger.info(f"设置目标群号为: {self.target_group}")
         yield event.plain_result(f"✅ 目标群号已设置为: {self.target_group}")
 
-    # 测试指令
-    @filter.command("test_send")
-    async def test_send(self, event: AstrMessageEvent):
-        """测试发送服务器信息到目标群"""
-        if not self.target_group:
-            yield event.plain_result("❌ 目标群号未设置，请先使用 /set_group 命令设置群号")
-            return
-        
-        # 验证群号格式
-        if not self.target_group.isdigit():
-            yield event.plain_result(f"❌ 当前群号 '{self.target_group}' 格式无效，请使用 /set_group 重新设置")
-            return
-        
-        try:
-            # 获取服务器信息
-            server_info = await self.get_minecraft_server_info()
-            
-            platform = self.context.get_platform(PlatformAdapterType.AIOCQHTTP)
-            if not platform or not hasattr(platform, 'get_client'):
-                yield event.plain_result("❌ 无法获取AIOCQHTTP平台")
-                return
-                
-            client = platform.get_client()
-            
-            result = await client.api.call_action('send_group_msg', **{
-                'group_id': int(self.target_group),
-                'message': f"📋 测试发送:\n{server_info}"
-            })
-            
-            if result and result.get('message_id'):
-                yield event.plain_result(f"✅ 测试发送成功！消息ID: {result.get('message_id')}")
-            else:
-                yield event.plain_result(f"❌ 测试发送失败: {result}")
-                
-        except ValueError as e:
-            yield event.plain_result(f"❌ 群号格式错误: {e}")
-        except Exception as e:
-            yield event.plain_result(f"❌ 测试发送出错: {e}")
+
 
     async def terminate(self):
         """插件销毁方法"""
