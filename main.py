@@ -223,8 +223,10 @@ class MyPlugin(Star):
     def _format_msg(self, data):
         if not data:
             return "❌ 无法连接到服务器"
-            
-        msg = [f"服务器: {data['name']}"]
+        
+        # Add status emoji based on server status
+        status_emoji = "🟢" if data.get('status') == 'online' else "🔴"
+        msg = [f"{status_emoji} 服务器: {data['name']}"]
         
         if data.get('motd'):
             msg.append(f"📝 MOTD: {data['motd']}")
@@ -232,14 +234,13 @@ class MyPlugin(Star):
         msg.append(f"🎮 版本: {data['version']}")
         msg.append(f"👥 在线玩家: {data['online']}")
         
-        if data.get('player_names'):
+        # Only show player list section if there are players online
+        if data.get('player_names') and data['online'] > 0:
             names = data['player_names']
             p_str = ", ".join(names[:10])
             if len(names) > 10:
                 p_str += f" 等{len(names)}人"
             msg.append(f"📋 玩家列表: {p_str}")
-        else:
-            msg.append("📋 玩家列表")
             
         return "\n".join(msg)
 
@@ -257,7 +258,7 @@ class MyPlugin(Star):
                     if self.last_player_count is None:
                         self.last_player_count = curr_online
                         self.last_player_list = curr_players
-                        logger.info(f"监控初始化完成，当前在线: {curr_online}")
+                        logger.info(f"监控初始化完成，当前在线: {curr_online}人")
                     else:
                         # 检测变化
                         changes = []
@@ -288,6 +289,9 @@ class MyPlugin(Star):
                             
                             await self.send_group_msg(notify_msg)
                         
+                        # Log status after each query cycle
+                        logger.info(f"自动查询完成 - 在线: {curr_online}人, 状态: 正常")
+                        
                         # 更新缓存
                         self.last_player_count = curr_online
                         self.last_player_list = curr_players
@@ -295,6 +299,12 @@ class MyPlugin(Star):
                 elif data is None:
                     # 获取失败时暂不处理，避免断网刷屏，仅日志
                     logger.debug("获取服务器数据失败")
+                elif data.get('status') == 'starting':
+                    # Server is starting
+                    logger.info(f"自动查询完成 - 服务器状态: 启动中")
+                else:
+                    # Server offline or other status
+                    logger.info(f"自动查询完成 - 服务器状态: {data.get('status', '未知')}")
                 
                 await asyncio.sleep(self.check_interval)
                 
