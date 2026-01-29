@@ -29,9 +29,15 @@ class MyPlugin(Star):
         self.server_name = self.config.get("server_name", "Minecraft服务器")
         self.server_ip = self.config.get("server_ip")
         self.server_port = self.config.get("server_port")
-        self.server_type = self.config.get("server_type", "be")
+        self.server_type = self.config.get("server_type", "je") # 默认为 je (Java版)
+        
         if isinstance(self.server_type, str):
             self.server_type = self.server_type.lower()
+            # 兼容性处理：将常见名称转换为 API 要求的 je/be
+            if self.server_type in ["java", "pc"]:
+                self.server_type = "je"
+            elif self.server_type in ["pe", "mcpe", "bedrock"]:
+                self.server_type = "be"
         
         self.check_interval = self.config.get("check_interval", 10)
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
@@ -129,6 +135,7 @@ class MyPlugin(Star):
                     if response.status == 200:
                         try:
                             data = await response.json()
+                            logger.info(f"请求URL: {url}")
                             logger.info(f"API返回数据: {data}")  # 调试日志
                         except json.JSONDecodeError:
                             logger.error(f"API响应JSON解析失败: {await response.text()}")
