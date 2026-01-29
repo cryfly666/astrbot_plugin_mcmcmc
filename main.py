@@ -24,7 +24,7 @@ class MyPlugin(Star):
         self.server_ip = self.config.get("server_ip")
         self.server_port = self.config.get("server_port")
         
-        # 服务器类型标准化
+        # 服务器类型标准化（仅用于日志显示，当前实现仅支持Java版）
         stype_raw = str(self.config.get("server_type", "je")).lower()
         self.server_type = "be" if stype_raw in ["be", "pe", "bedrock"] else "je"
         
@@ -99,12 +99,17 @@ class MyPlugin(Star):
         """从流中读取VarInt格式的整数（Minecraft协议）"""
         val = 0
         shift = 0
+        bytes_read = 0
+        max_bytes = 5  # VarInt最多5字节
         while True:
             byte = await reader.read(1)
             if len(byte) == 0:
                 raise Exception("Connection closed")
             b = byte[0]
             val |= (b & 0x7F) << shift
+            bytes_read += 1
+            if bytes_read > max_bytes:
+                raise Exception("VarInt too big")
             if (b & 0x80) == 0:
                 break
             shift += 7
@@ -125,11 +130,11 @@ class MyPlugin(Star):
             host_bytes = host.encode("utf-8")
             handshake = (
                 b"\x00"
-                + self._pack_varint(0)
+                + self._pack_varint(-1)  # Protocol version: -1 for status
                 + self._pack_varint(len(host_bytes))
                 + host_bytes
                 + struct.pack(">H", int(port))
-                + self._pack_varint(1)
+                + self._pack_varint(1)  # Next state: 1 for status
             )
             packet = self._pack_varint(len(handshake)) + handshake
             writer.write(packet)
@@ -162,7 +167,7 @@ class MyPlugin(Star):
             writer.close()
             try:
                 await writer.wait_closed()
-            except:
+            except (ConnectionError, OSError, asyncio.CancelledError):
                 pass
 
     async def _fetch_server_data(self):

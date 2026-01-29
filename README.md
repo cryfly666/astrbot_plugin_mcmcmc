@@ -14,6 +14,7 @@
 - 🚀 **自动启动**: 可配置插件加载时自动启动监控（延迟5秒启动）
 - 💬 **一言集成**: 消息推送时附带一言句子，更有趣味性
 - 🔌 **零依赖**: 使用原生Socket协议直接与服务器通信，无需外部API或服务端插件
+- 🎮 **Java版支持**: 支持Minecraft Java版服务器（基岩版暂不支持）
 
 ## 配置选项
 
@@ -25,7 +26,10 @@
 | `server_name` | 服务器名称 | 字符串 | "Minecraft服务器" | ❌ |
 | `server_ip` | 服务器IP地址 | 字符串 | 无 | ✅ |
 | `server_port` | 服务器端口 | 数字 | 无 | ✅ |
+| `server_type` | 服务器类型 | 字符串 | "je" | ❌ |
 | `check_interval` | 监控检查间隔（秒） | 数字 | 10 | ❌ |
+
+**注意**: `server_type` 配置仅用于显示，当前版本仅支持Java版服务器。基岩版支持计划在未来版本中添加。
 | `enable_auto_monitor` | 插件加载时自动启动监控 | 布尔值 | false | ❌ |
 
 ## 可用指令
@@ -123,7 +127,11 @@ data/plugins/服务器查询/
 ## API说明
 
 ### Minecraft Server List Ping 协议
-插件使用 Minecraft Server List Ping 协议直接与服务器通信，无需依赖外部API。该协议是Minecraft官方协议，适用于大多数Java版和基岩版服务器。
+插件使用 Minecraft Server List Ping 协议直接与服务器通信，无需依赖外部API。该协议是Minecraft官方协议的一部分。
+
+**支持说明**:
+- ✅ **Java版**: 完全支持，适用于原版及大多数服务端（Spigot, Paper, Fabric, Forge等）
+- ❌ **基岩版**: 暂不支持（基岩版使用不同的RakNet协议，计划在未来版本中添加支持）
 
 **数据格式**:
 - 通过Socket连接直接发送握手包和状态请求包
@@ -156,7 +164,10 @@ A: 使用 `/查询` 测试，检查群号是否正确，机器人是否有发送
 A: 使用 `/set_group <群号>` 指令动态修改，或在WebUI配置页面修改。
 
 **Q: 需要在 MC 服务器安装插件吗？**  
-A: 不需要。本插件通过 Minecraft Server List Ping 协议直接查询，适用于原版及大多数服务端（Spigot, Paper, Fabric, Forge 等）。
+A: 不需要。本插件通过 Minecraft Server List Ping 协议直接查询，适用于Java版原版及大多数服务端（Spigot, Paper, Fabric, Forge 等）。
+
+**Q: 支持基岩版服务器吗？**  
+A: 当前版本仅支持Java版服务器。基岩版使用不同的协议，支持计划在未来版本中添加。
 
 **Q: 报错 "Connection refused"？**  
 A: 请检查 `server_ip` 和 `server_port` 是否正确，并确保服务器防火墙放行了对应端口。
