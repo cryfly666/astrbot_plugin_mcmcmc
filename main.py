@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 import json
 import struct
+import traceback
 
 @register("minecraft_monitor", "YourName", "Minecraft服务器监控插件", "2.0.0")
 class MyPlugin(Star):
@@ -363,7 +364,6 @@ class MyPlugin(Star):
             logger.info(f"✅ 消息已发送到群 {self.target_group}")
         except Exception as e:
             logger.error(f"❌ 消息发送失败到群 {self.target_group}: {type(e).__name__}: {e}")
-            import traceback
             logger.error(f"详细错误信息:\n{traceback.format_exc()}")
 
     # --- 指令区域 ---
