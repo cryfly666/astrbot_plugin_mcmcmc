@@ -30,6 +30,7 @@ class MyPlugin(Star):
         # 缓存数据
         self.last_player_count = None
         self.last_player_list = []
+        self.unified_msg_origin = None  # 存储消息来源，用于主动发送消息
         
         if not self.target_group or not self.server_ip or not self.server_port:
             logger.error("配置不完整(target_group/ip/port)，监控无法启动")
@@ -333,22 +334,18 @@ class MyPlugin(Star):
                 await asyncio.sleep(5)
 
     async def send_group_msg(self, text):
-        if not self.target_group:
-            logger.warning("消息发送失败: target_group 未配置")
+        if not self.unified_msg_origin:
+            logger.warning("消息发送失败: unified_msg_origin 未设置，请先在目标群中使用任意指令初始化")
             return
         try:
-            # Use modern AstrBot API to send messages
-            # Construct a message session for the target group
-            # Format: "platform_id:message_type:session_id"
-            # For group messages: "aiocqhttp:GroupMessage:<group_id>"
-            session = f"aiocqhttp:GroupMessage:{self.target_group}"
+            # 使用 AstrBot API 的 unified_msg_origin 发送消息
             message_chain = MessageChain()
             message_chain.chain.append(Plain(text=text))
-            logger.info(f"正在发送消息到群 {self.target_group}")
-            await self.context.send_message(session, message_chain)
-            logger.info(f"✅ 消息已发送到群 {self.target_group}")
+            logger.info(f"正在发送消息 (使用 unified_msg_origin: {self.unified_msg_origin})")
+            await self.context.send_message(self.unified_msg_origin, message_chain)
+            logger.info(f"✅ 消息已发送")
         except Exception as e:
-            logger.error(f"❌ 消息发送失败到群 {self.target_group}: {type(e).__name__}: {e}")
+            logger.error(f"❌ 消息发送失败: {type(e).__name__}: {e}")
             import traceback
             logger.error(f"详细错误信息:\n{traceback.format_exc()}")
 
@@ -356,6 +353,10 @@ class MyPlugin(Star):
 
     @filter.command("start_server_monitor")
     async def cmd_start(self, event: AstrMessageEvent):
+        # 存储消息来源，用于后续主动发送消息
+        self.unified_msg_origin = event.unified_msg_origin
+        logger.info(f"已更新 unified_msg_origin: {self.unified_msg_origin}")
+        
         if self.task and not self.task.done():
             yield event.plain_result("⚠️ 监控已在运行中")
         else:
@@ -364,6 +365,10 @@ class MyPlugin(Star):
 
     @filter.command("stop_server_monitor")
     async def cmd_stop(self, event: AstrMessageEvent):
+        # 存储消息来源
+        self.unified_msg_origin = event.unified_msg_origin
+        logger.info(f"已更新 unified_msg_origin: {self.unified_msg_origin}")
+        
         if self.task:
             self.task.cancel()
             try:
@@ -375,6 +380,10 @@ class MyPlugin(Star):
 
     @filter.command("查询")
     async def cmd_query(self, event: AstrMessageEvent):
+        # 存储消息来源
+        self.unified_msg_origin = event.unified_msg_origin
+        logger.info(f"已更新 unified_msg_origin: {self.unified_msg_origin}")
+        
         data = await self._fetch_server_data()
         msg = self._format_msg(data)
         hito = await self.get_hitokoto()
@@ -383,12 +392,20 @@ class MyPlugin(Star):
 
     @filter.command("reset_monitor")
     async def cmd_reset(self, event: AstrMessageEvent):
+        # 存储消息来源
+        self.unified_msg_origin = event.unified_msg_origin
+        logger.info(f"已更新 unified_msg_origin: {self.unified_msg_origin}")
+        
         self.last_player_count = None
         self.last_player_list = []
         yield event.plain_result("🔄 缓存已重置，下次检测将视为首次")
 
     @filter.command("set_group")
     async def cmd_setgroup(self, event: AstrMessageEvent, group_id: str):
+        # 存储消息来源
+        self.unified_msg_origin = event.unified_msg_origin
+        logger.info(f"已更新 unified_msg_origin: {self.unified_msg_origin}")
+        
         if group_id.isdigit():
             self.target_group = group_id
             yield event.plain_result(f"✅ 目标群已设为: {group_id}")
