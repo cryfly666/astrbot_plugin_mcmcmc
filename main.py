@@ -4,7 +4,8 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.platform import PlatformAdapterType
 import asyncio
 import aiohttp
-import time
+import json
+import struct
 
 @register("minecraft_monitor", "YourName", "Minecraft服务器监控插件", "2.0.0")
 class MyPlugin(Star):
@@ -23,7 +24,7 @@ class MyPlugin(Star):
         self.server_ip = self.config.get("server_ip")
         self.server_port = self.config.get("server_port")
         
-        # 服务器类型标准化
+        # 服务器类型标准化（仅用于日志显示，当前实现仅支持Java版）
         stype_raw = str(self.config.get("server_type", "je")).lower()
         self.server_type = "be" if stype_raw in ["be", "pe", "bedrock"] else "je"
         
@@ -79,72 +80,171 @@ class MyPlugin(Star):
                     names.append(str(p))
         return names
 
-    async def _fetch_server_data(self):
-        """获取数据，增加防缓存机制"""
-        if not self.server_ip or not self.server_port: return None
-        
-        # 增加时间戳参数防止CDN缓存
-        ts = int(time.time())
-        url = f"https://motd.minebbs.com/api/status?ip={self.server_ip}&port={self.server_port}&stype={self.server_type}&_={ts}"
-        
-        # 伪装成浏览器
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-            "Cache-Control": "no-cache"
-        }
+    def _pack_varint(self, val):
+        """将整数打包为VarInt格式（Minecraft协议）"""
+        total = b""
+        if val < 0:
+            val = (1 << 32) + val
+        while True:
+            byte = val & 0x7F
+            val >>= 7
+            if val != 0:
+                byte |= 0x80
+            total += bytes([byte])
+            if val == 0:
+                break
+        return total
+
+    async def _read_varint(self, reader):
+        """从流中读取VarInt格式的整数（Minecraft协议）"""
+        val = 0
+        shift = 0
+        bytes_read = 0
+        max_bytes = 5  # VarInt最多5字节
+        while True:
+            byte = await reader.read(1)
+            if len(byte) == 0:
+                raise Exception("Connection closed")
+            b = byte[0]
+            val |= (b & 0x7F) << shift
+            bytes_read += 1
+            if bytes_read > max_bytes:
+                raise Exception("VarInt too big")
+            if (b & 0x80) == 0:
+                break
+            shift += 7
+        return val
+
+    async def _ping_server(self, host, port):
+        """使用Minecraft Server List Ping协议直接查询服务器"""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5.0
+            )
+        except Exception as e:
+            logger.debug(f"无法连接到服务器 {host}:{port} - {e}")
+            return None
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=10) as response:
-                    if response.status != 200:
-                        logger.warning(f"API请求失败: {response.status}")
-                        return None
-                        
-                    data = await response.json()
-                    # logger.debug(f"API数据: {data}") # 调试时可开启
+            # 发送握手包
+            host_bytes = host.encode("utf-8")
+            handshake = (
+                b"\x00"
+                + self._pack_varint(-1)  # Protocol version: -1 for status
+                + self._pack_varint(len(host_bytes))
+                + host_bytes
+                + struct.pack(">H", int(port))
+                + self._pack_varint(1)  # Next state: 1 for status
+            )
+            packet = self._pack_varint(len(handshake)) + handshake
+            writer.write(packet)
 
-                    # 解析基础信息
-                    status = data.get('status', 'offline')
-                    version = data.get('version') or '未知版本'
-                    motd = data.get('motd', '')
-                    
-                    # 提取MOTD纯文本
-                    if isinstance(motd, dict):
-                        motd = ' '.join(map(str, motd.get('clean', [])))
-                    
-                    # 解析玩家信息 (重点优化部分)
-                    p_info = data.get('players', {})
-                    # 某些基岩版API直接返回数字或None，统一转字典处理
-                    if not isinstance(p_info, dict):
-                        p_info = {'online': 0, 'max': 0, 'sample': []}
+            # 发送状态请求包
+            request = b"\x00"
+            packet = self._pack_varint(len(request)) + request
+            writer.write(packet)
+            await writer.drain()
 
-                    online = int(p_info.get('online', 0) or 0)
-                    max_p = int(p_info.get('max', 0) or 0)
+            # 读取响应
+            async def read_response():
+                length = await self._read_varint(reader)
+                packet_id = await self._read_varint(reader)
+
+                if packet_id == 0:
+                    json_len = await self._read_varint(reader)
+                    data = await reader.readexactly(json_len)
+                    decoded_data = data.decode("utf-8")
+                    logger.debug(f"MC Server response: {decoded_data}")
+                    return json.loads(decoded_data)
+                return None
+
+            return await asyncio.wait_for(read_response(), timeout=5.0)
+
+        except Exception as e:
+            logger.warning(f"服务器Ping失败: {e}")
+            return None
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, OSError, asyncio.CancelledError):
+                pass
+
+    async def _fetch_server_data(self):
+        """获取Minecraft服务器数据（使用直接Socket连接）"""
+        if not self.server_ip or not self.server_port: return None
+        
+        try:
+            data = await self._ping_server(self.server_ip, int(self.server_port))
+            logger.debug(f"MC Server raw data: {data}")
+
+            if data:
+                # 检查是否为正常的服务器信息
+                if "version" in data and "players" in data:
+                    version = data.get("version", {}).get("name", "未知版本")
+                    players_info = data.get("players", {})
+                    online_players = players_info.get("online", 0)
+                    max_players = players_info.get("max", 0)
+                    player_sample = players_info.get("sample", [])
                     
-                    # 智能查找玩家列表字段
-                    sample = (p_info.get('sample') or p_info.get('list') or [])
-                    
-                    # 提取具体玩家名
-                    player_names = self._parse_players(sample)
+                    # 提取MOTD（如果有的话）
+                    motd_data = data.get("description", "")
+                    motd = ""
+                    if isinstance(motd_data, dict):
+                        motd = motd_data.get("text", "")
+                    elif isinstance(motd_data, str):
+                        motd = motd_data
+
+                    # 提取玩家名
+                    player_names = self._parse_players(player_sample)
 
                     return {
-                        'status': status,
-                        'name': data.get('hostname') or self.server_name,
+                        'status': 'online',
+                        'name': self.server_name,
                         'version': version,
-                        'online': online,
-                        'max': max_p,
+                        'online': online_players,
+                        'max': max_players,
                         'player_names': player_names,
-                        'motd': str(motd)
+                        'motd': motd
                     }
+                else:
+                    # 可能是启动中或其他状态
+                    description = data.get("text", str(data))
+                    return {
+                        'status': 'starting',
+                        'name': self.server_name,
+                        'version': '启动中',
+                        'online': 0,
+                        'max': 0,
+                        'player_names': [],
+                        'motd': description
+                    }
+            else:
+                return {
+                    'status': 'offline',
+                    'name': self.server_name,
+                    'version': '未知',
+                    'online': 0,
+                    'max': 0,
+                    'player_names': [],
+                    'motd': ''
+                }
+
         except Exception as e:
             logger.error(f"获取服务器信息出错: {e}")
             return None
 
     def _format_msg(self, data):
-        if not data: return "❌ 无法连接到监控API"
+        if not data: return "❌ 无法连接到服务器"
         
-        emoji = "🟢" if data['status'] == "online" else "🔴"
+        status = data['status']
+        if status == "online":
+            emoji = "🟢"
+        elif status == "starting":
+            emoji = "🟡"
+        else:
+            emoji = "🔴"
+            
         msg = [f"{emoji} {data['name']}"]
         
         if data['motd']:
