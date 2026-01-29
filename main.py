@@ -7,6 +7,8 @@ import asyncio
 import aiohttp
 import json
 import struct
+import socket
+import errno
 
 @register("minecraft_monitor", "YourName", "Minecraft服务器监控插件", "2.0.0")
 class MyPlugin(Star):
@@ -114,10 +116,11 @@ class MyPlugin(Star):
         except ConnectionRefusedError:
             logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接被拒绝 - 请检查服务器是否已启动，端口号是否正确")
             return None
+        except socket.gaierror as e:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 无法解析服务器地址 - 请检查域名或IP地址是否正确 ({e})")
+            return None
         except OSError as e:
-            if "Name or service not known" in str(e) or "getaddrinfo failed" in str(e):
-                logger.warning(f"服务器Ping失败 [{host}:{port}]: 无法解析服务器地址 - 请检查域名或IP地址是否正确")
-            elif "Network is unreachable" in str(e):
+            if e.errno == errno.ENETUNREACH:
                 logger.warning(f"服务器Ping失败 [{host}:{port}]: 网络不可达 - 请检查网络连接")
             else:
                 logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接错误 - {type(e).__name__}: {e}")
@@ -165,10 +168,10 @@ class MyPlugin(Star):
             logger.warning(f"服务器Ping失败 [{host}:{port}]: 读取响应超时 (5秒) - 服务器可能正在启动或响应缓慢")
             return None
         except asyncio.IncompleteReadError as e:
-            logger.warning(f"服务器Ping失败 [{host}:{port}]: 数据读取不完整 - 服务器提前关闭连接，可能不是Minecraft Java版服务器或正在重启")
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 数据读取不完整 - 服务器提前关闭连接，可能不是Minecraft Java版服务器或正在重启 (期望 {e.expected} 字节，实际收到 {len(e.partial)} 字节)")
             return None
         except UnicodeDecodeError as e:
-            logger.warning(f"服务器Ping失败 [{host}:{port}]: 响应数据解码失败 - 服务器返回的数据格式不正确")
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 响应数据解码失败 - 服务器返回的数据格式不正确 ({e.reason})")
             return None
         except json.JSONDecodeError as e:
             logger.warning(f"服务器Ping失败 [{host}:{port}]: JSON解析失败 - 服务器返回的数据不是有效的JSON格式 (位置: {e.pos})")
