@@ -1,5 +1,4 @@
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.event.filter import PlatformAdapterType
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 import asyncio
@@ -307,7 +306,7 @@ class MyPlugin(Star):
         if not self.target_group:
             return
         try:
-            platform = self.context.get_platform(PlatformAdapterType.AIOCQHTTP)
+            platform = self.context.get_platform("aiocqhttp")
             if not platform:
                 logger.error("无法获取AIOCQHTTP平台")
                 return
