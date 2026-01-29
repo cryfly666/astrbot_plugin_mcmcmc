@@ -108,8 +108,14 @@ class MyPlugin(Star):
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port), timeout=10.0
             )
+        except asyncio.TimeoutError:
+            logger.warning(f"服务器Ping失败: {host}:{port} - 连接超时(10秒)")
+            return None
+        except ConnectionRefusedError:
+            logger.warning(f"服务器Ping失败: {host}:{port} - 连接被拒绝(服务器可能未运行)")
+            return None
         except Exception as e:
-            logger.debug(f"无法连接到服务器 {host}:{port} - {e}")
+            logger.warning(f"服务器Ping失败: {host}:{port} - {type(e).__name__}: {e}")
             return None
 
         try:
@@ -147,8 +153,14 @@ class MyPlugin(Star):
 
             return await asyncio.wait_for(read_response(), timeout=10.0)
 
+        except asyncio.TimeoutError:
+            logger.warning(f"服务器Ping失败: {host}:{port} - 读取响应超时(10秒)")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(f"服务器Ping失败: {host}:{port} - JSON解析错误: {e}")
+            return None
         except Exception as e:
-            logger.warning(f"服务器Ping失败: {e}")
+            logger.warning(f"服务器Ping失败: {host}:{port} - {type(e).__name__}: {e}")
             return None
         finally:
             writer.close()
@@ -223,8 +235,15 @@ class MyPlugin(Star):
     def _format_msg(self, data):
         if not data:
             return "❌ 无法连接到服务器"
-            
-        msg = [f"服务器: {data['name']}"]
+        
+        # Add status emoji based on server status
+        if data.get('status') == 'online':
+            status_emoji = "🟢"
+        elif data.get('status') == 'starting':
+            status_emoji = "🟡"
+        else:
+            status_emoji = "🔴"
+        msg = [f"{status_emoji} 服务器: {data['name']}"]
         
         if data.get('motd'):
             msg.append(f"📝 MOTD: {data['motd']}")
@@ -232,14 +251,13 @@ class MyPlugin(Star):
         msg.append(f"🎮 版本: {data['version']}")
         msg.append(f"👥 在线玩家: {data['online']}")
         
-        if data.get('player_names'):
+        # Only show player list section if there are players online
+        if data.get('player_names') and data['online'] > 0:
             names = data['player_names']
             p_str = ", ".join(names[:10])
             if len(names) > 10:
                 p_str += f" 等{len(names)}人"
             msg.append(f"📋 玩家列表: {p_str}")
-        else:
-            msg.append("📋 玩家列表")
             
         return "\n".join(msg)
 
@@ -257,7 +275,7 @@ class MyPlugin(Star):
                     if self.last_player_count is None:
                         self.last_player_count = curr_online
                         self.last_player_list = curr_players
-                        logger.info(f"监控初始化完成，当前在线: {curr_online}")
+                        logger.info(f"监控初始化完成，当前在线: {curr_online}人")
                     else:
                         # 检测变化
                         changes = []
@@ -278,7 +296,7 @@ class MyPlugin(Star):
                             changes.append(f"{symbol} 在线人数变化: {diff:+d} (当前 {curr_online}人)")
 
                         if changes:
-                            logger.info(f"检测到变化: {changes}")
+                            logger.info(f"🔔 检测到变化: {changes}")
                             # 构建完整消息
                             notify_msg = "🔔 状态变动:\n" + "\n".join(changes)
                             notify_msg += f"\n\n{self._format_msg(data)}"
@@ -286,7 +304,11 @@ class MyPlugin(Star):
                             hito = await self.get_hitokoto()
                             if hito: notify_msg += f"\n\n💬 {hito}"
                             
+                            logger.info(f"准备发送变动通知消息，长度: {len(notify_msg)} 字符")
                             await self.send_group_msg(notify_msg)
+                        
+                        # Log status after each query cycle
+                        logger.info(f"自动查询完成 - 在线: {curr_online}人, 状态: 正常")
                         
                         # 更新缓存
                         self.last_player_count = curr_online
@@ -295,6 +317,12 @@ class MyPlugin(Star):
                 elif data is None:
                     # 获取失败时暂不处理，避免断网刷屏，仅日志
                     logger.debug("获取服务器数据失败")
+                else:
+                    # Handle other server statuses
+                    if data.get('status') == 'starting':
+                        logger.info(f"自动查询完成 - 服务器状态: 启动中")
+                    else:
+                        logger.info(f"自动查询完成 - 服务器状态: {data.get('status', '未知')}")
                 
                 await asyncio.sleep(self.check_interval)
                 
@@ -306,6 +334,7 @@ class MyPlugin(Star):
 
     async def send_group_msg(self, text):
         if not self.target_group:
+            logger.warning("消息发送失败: target_group 未配置")
             return
         try:
             # Use modern AstrBot API to send messages
@@ -315,9 +344,13 @@ class MyPlugin(Star):
             session = f"aiocqhttp:GroupMessage:{self.target_group}"
             message_chain = MessageChain()
             message_chain.chain.append(Plain(text=text))
+            logger.info(f"正在发送消息到群 {self.target_group}")
             await self.context.send_message(session, message_chain)
+            logger.info(f"✅ 消息已发送到群 {self.target_group}")
         except Exception as e:
-            logger.error(f"消息发送失败: {e}")
+            logger.error(f"❌ 消息发送失败到群 {self.target_group}: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"详细错误信息:\n{traceback.format_exc()}")
 
     # --- 指令区域 ---
 
