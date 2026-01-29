@@ -25,11 +25,8 @@
 | `target_group` | QQ群号 | 字符串/数字 | 无 | ✅ |
 | `server_name` | 服务器名称 | 字符串 | "Minecraft服务器" | ❌ |
 | `server_ip` | 服务器IP地址 | 字符串 | 无 | ✅ |
-| `server_port` | 服务器端口 | 数字 | 无 | ✅ |
-| `server_type` | 服务器类型 | 字符串 | "je" | ❌ |
+| `server_port` | 服务器端口 | 数字 | 25565 | ✅ |
 | `check_interval` | 监控检查间隔（秒） | 数字 | 10 | ❌ |
-
-**注意**: `server_type` 配置仅用于显示，当前版本仅支持Java版服务器。基岩版支持计划在未来版本中添加。
 | `enable_auto_monitor` | 插件加载时自动启动监控 | 布尔值 | false | ❌ |
 
 ## 可用指令
@@ -79,7 +76,6 @@
 ### 状态缓存
 - `last_player_count`: 上次的玩家数量（None表示未初始化）
 - `last_player_list`: 上次的玩家列表
-- `last_status`: 上次的服务器状态
 
 使用 `/reset_monitor` 可以清除缓存，下次检测将视为首次检测。
 
@@ -112,7 +108,6 @@ data/plugins/服务器查询/
 - **server_ip**: Minecraft服务器IP
 - **server_port**: 服务器端口（Java版默认25565）
 - **server_name**: 自定义服务器名称（可选）
-- **server_type**: 服务器版本(⚠️ :java版为je，基岩版为be)
 - **check_interval**: 检查间隔，建议10-60秒
 - **enable_auto_monitor**: 是否自动启动监控
 

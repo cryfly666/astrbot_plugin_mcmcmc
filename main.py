@@ -23,11 +23,6 @@ class MyPlugin(Star):
         self.server_name = self.config.get("server_name", "Minecraft服务器")
         self.server_ip = self.config.get("server_ip")
         self.server_port = self.config.get("server_port")
-        
-        # 服务器类型标准化（仅用于日志显示，当前实现仅支持Java版）
-        stype_raw = str(self.config.get("server_type", "je")).lower()
-        self.server_type = "be" if stype_raw in ["be", "pe", "bedrock"] else "je"
-        
         self.check_interval = int(self.config.get("check_interval", 10))
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
         
@@ -39,7 +34,7 @@ class MyPlugin(Star):
             logger.error("配置不完整(target_group/ip/port)，监控无法启动")
             self.enable_auto_monitor = False
         else:
-            logger.info(f"MC监控已加载 | 服务器: {self.server_ip}:{self.server_port} ({self.server_type.upper()})")
+            logger.info(f"MC监控已加载 | 服务器: {self.server_ip}:{self.server_port}")
         
         if self.enable_auto_monitor:
             asyncio.create_task(self._delayed_auto_start())
@@ -54,31 +49,22 @@ class MyPlugin(Star):
         """获取一言"""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get("https://v1.hitokoto.cn/?encode=text", timeout=2) as resp:
+                async with session.get("https://v1.hitokoto.cn/?encode=text", timeout=aiohttp.ClientTimeout(total=2)) as resp:
                     return await resp.text() if resp.status == 200 else None
-        except:
+        except Exception as e:
+            logger.debug(f"获取一言失败: {e}")
             return None
 
     def _parse_players(self, players_data):
-        """统一解析玩家列表，返回名字列表"""
-        names = []
+        """解析玩家列表，返回名字列表"""
         if not players_data:
-            return names
-            
-        # 兼容字符串格式 "A, B, C"
-        if isinstance(players_data, str):
-            return [n.strip() for n in players_data.split(",") if n.strip()]
-            
-        # 兼容列表格式
+            return []
+        
+        # 标准格式：列表包含字典 [{"name": "player1"}, ...]
         if isinstance(players_data, list):
-            for p in players_data:
-                if isinstance(p, dict):
-                    # 尝试获取各种可能的名称字段
-                    name = p.get("name") or p.get("username") or p.get("name_clean") or p.get("xuid")
-                    if name: names.append(str(name))
-                else:
-                    names.append(str(p))
-        return names
+            return [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in players_data]
+        
+        return []
 
     def _pack_varint(self, val):
         """将整数打包为VarInt格式（Minecraft协议）"""
@@ -172,54 +158,14 @@ class MyPlugin(Star):
 
     async def _fetch_server_data(self):
         """获取Minecraft服务器数据（使用直接Socket连接）"""
-        if not self.server_ip or not self.server_port: return None
+        if not self.server_ip or not self.server_port:
+            return None
         
         try:
             data = await self._ping_server(self.server_ip, int(self.server_port))
             logger.debug(f"MC Server raw data: {data}")
 
-            if data:
-                # 检查是否为正常的服务器信息
-                if "version" in data and "players" in data:
-                    version = data.get("version", {}).get("name", "未知版本")
-                    players_info = data.get("players", {})
-                    online_players = players_info.get("online", 0)
-                    max_players = players_info.get("max", 0)
-                    player_sample = players_info.get("sample", [])
-                    
-                    # 提取MOTD（如果有的话）
-                    motd_data = data.get("description", "")
-                    motd = ""
-                    if isinstance(motd_data, dict):
-                        motd = motd_data.get("text", "")
-                    elif isinstance(motd_data, str):
-                        motd = motd_data
-
-                    # 提取玩家名
-                    player_names = self._parse_players(player_sample)
-
-                    return {
-                        'status': 'online',
-                        'name': self.server_name,
-                        'version': version,
-                        'online': online_players,
-                        'max': max_players,
-                        'player_names': player_names,
-                        'motd': motd
-                    }
-                else:
-                    # 可能是启动中或其他状态
-                    description = data.get("text", str(data))
-                    return {
-                        'status': 'starting',
-                        'name': self.server_name,
-                        'version': '启动中',
-                        'online': 0,
-                        'max': 0,
-                        'player_names': [],
-                        'motd': description
-                    }
-            else:
+            if not data:
                 return {
                     'status': 'offline',
                     'name': self.server_name,
@@ -229,34 +175,70 @@ class MyPlugin(Star):
                     'player_names': [],
                     'motd': ''
                 }
+            
+            # 检查是否为正常的服务器信息
+            if "version" in data and "players" in data:
+                version = data.get("version", {}).get("name", "未知版本")
+                players_info = data.get("players", {})
+                online_players = players_info.get("online", 0)
+                max_players = players_info.get("max", 0)
+                player_sample = players_info.get("sample", [])
+                
+                # 提取MOTD
+                motd_data = data.get("description", "")
+                if isinstance(motd_data, dict):
+                    motd = motd_data.get("text", "")
+                else:
+                    motd = str(motd_data) if motd_data else ""
+
+                # 提取玩家名
+                player_names = self._parse_players(player_sample)
+
+                return {
+                    'status': 'online',
+                    'name': self.server_name,
+                    'version': version,
+                    'online': online_players,
+                    'max': max_players,
+                    'player_names': player_names,
+                    'motd': motd
+                }
+            
+            # 可能是启动中或其他状态
+            return {
+                'status': 'starting',
+                'name': self.server_name,
+                'version': '启动中',
+                'online': 0,
+                'max': 0,
+                'player_names': [],
+                'motd': str(data)
+            }
 
         except Exception as e:
             logger.error(f"获取服务器信息出错: {e}")
             return None
 
     def _format_msg(self, data):
-        if not data: return "❌ 无法连接到服务器"
+        if not data:
+            return "❌ 无法连接到服务器"
         
-        status = data['status']
-        if status == "online":
-            emoji = "🟢"
-        elif status == "starting":
-            emoji = "🟡"
-        else:
-            emoji = "🔴"
+        status_emoji = {"online": "🟢", "starting": "🟡", "offline": "🔴"}
+        emoji = status_emoji.get(data['status'], "🔴")
             
         msg = [f"{emoji} {data['name']}"]
         
-        if data['motd']:
+        if data.get('motd'):
             msg.append(f"📝 {data['motd']}")
             
         msg.append(f"🎮 {data['version']}")
         msg.append(f"👥 在线: {data['online']}/{data['max']}")
         
-        if data['player_names']:
+        if data.get('player_names'):
             names = data['player_names']
             p_str = ", ".join(names[:10])
-            if len(names) > 10: p_str += f" 等{len(names)}人"
+            if len(names) > 10:
+                p_str += f" 等{len(names)}人"
             msg.append(f"📋 列表: {p_str}")
             
         return "\n".join(msg)
@@ -323,11 +305,14 @@ class MyPlugin(Star):
                 await asyncio.sleep(5)
 
     async def send_group_msg(self, text):
-        if not self.target_group: return
+        if not self.target_group:
+            return
         try:
             platform = self.context.get_platform(PlatformAdapterType.AIOCQHTTP)
-            if platform:
-                await platform.get_client().api.call_action('send_group_msg', group_id=int(self.target_group), message=text)
+            if not platform:
+                logger.error("无法获取AIOCQHTTP平台")
+                return
+            await platform.get_client().api.call_action('send_group_msg', group_id=int(self.target_group), message=text)
         except Exception as e:
             logger.error(f"消息发送失败: {e}")
 
@@ -371,4 +356,9 @@ class MyPlugin(Star):
             yield event.plain_result("❌ 群号必须为纯数字")
 
     async def terminate(self):
-        if self.task: self.task.cancel()
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
