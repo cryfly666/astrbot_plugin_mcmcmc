@@ -1,7 +1,8 @@
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.platform import PlatformAdapterType
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
+from astrbot.core.message.components import Plain
+from astrbot.core.message.message_event_result import MessageChain
 import asyncio
 import aiohttp
 import json
@@ -307,11 +308,14 @@ class MyPlugin(Star):
         if not self.target_group:
             return
         try:
-            platform = self.context.get_platform(PlatformAdapterType.AIOCQHTTP)
-            if not platform:
-                logger.error("无法获取AIOCQHTTP平台")
-                return
-            await platform.get_client().api.call_action('send_group_msg', group_id=int(self.target_group), message=text)
+            # Use modern AstrBot API to send messages
+            # Construct a message session for the target group
+            # Format: "platform_id:message_type:session_id"
+            # For group messages: "aiocqhttp:GroupMessage:<group_id>"
+            session = f"aiocqhttp:GroupMessage:{self.target_group}"
+            message_chain = MessageChain()
+            message_chain.chain.append(Plain(text=text))
+            await self.context.send_message(session, message_chain)
         except Exception as e:
             logger.error(f"消息发送失败: {e}")
 
