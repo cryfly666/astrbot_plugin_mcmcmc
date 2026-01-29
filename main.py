@@ -345,7 +345,7 @@ class MyPlugin(Star):
             message_chain = MessageChain()
             message_chain.chain.append(Plain(text=text))
             logger.info(f"正在发送消息到群 {self.target_group}")
-            await self.context.send_message(session, message_chain)
+            await self.context.send(session, message_chain)
             logger.info(f"✅ 消息已发送到群 {self.target_group}")
         except Exception as e:
             logger.error(f"❌ 消息发送失败到群 {self.target_group}: {type(e).__name__}: {e}")
