@@ -108,8 +108,22 @@ class MyPlugin(Star):
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port), timeout=5.0
             )
+        except asyncio.TimeoutError:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接超时 (5秒) - 请检查服务器地址、端口是否正确，以及防火墙设置")
+            return None
+        except ConnectionRefusedError:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接被拒绝 - 请检查服务器是否已启动，端口号是否正确")
+            return None
+        except OSError as e:
+            if "Name or service not known" in str(e) or "getaddrinfo failed" in str(e):
+                logger.warning(f"服务器Ping失败 [{host}:{port}]: 无法解析服务器地址 - 请检查域名或IP地址是否正确")
+            elif "Network is unreachable" in str(e):
+                logger.warning(f"服务器Ping失败 [{host}:{port}]: 网络不可达 - 请检查网络连接")
+            else:
+                logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接错误 - {type(e).__name__}: {e}")
+            return None
         except Exception as e:
-            logger.debug(f"无法连接到服务器 {host}:{port} - {e}")
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 未知连接错误 - {type(e).__name__}: {e}")
             return None
 
         try:
@@ -147,8 +161,24 @@ class MyPlugin(Star):
 
             return await asyncio.wait_for(read_response(), timeout=5.0)
 
+        except asyncio.TimeoutError:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 读取响应超时 (5秒) - 服务器可能正在启动或响应缓慢")
+            return None
+        except asyncio.IncompleteReadError as e:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 数据读取不完整 - 服务器提前关闭连接，可能不是Minecraft Java版服务器或正在重启")
+            return None
+        except UnicodeDecodeError as e:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 响应数据解码失败 - 服务器返回的数据格式不正确")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: JSON解析失败 - 服务器返回的数据不是有效的JSON格式 (位置: {e.pos})")
+            return None
+        except ConnectionError as e:
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: 连接中断 - {type(e).__name__}: {e}")
+            return None
         except Exception as e:
-            logger.warning(f"服务器Ping失败: {e}")
+            error_type = type(e).__name__
+            logger.warning(f"服务器Ping失败 [{host}:{port}]: {error_type} - {e}")
             return None
         finally:
             writer.close()
