@@ -2,8 +2,6 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.event.filter import PlatformAdapterType
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
-from astrbot.core.message.components import Plain
-from astrbot.core.message.message_event_result import MessageChain
 import asyncio
 import aiohttp
 import json
@@ -351,6 +349,10 @@ class MyPlugin(Star):
 
             # 获取底层的 API 客户端
             client = platform.get_client()
+            
+            if not client:
+                logger.error("无法获取 AIOCQHTTP 客户端，无法发送消息")
+                return
             
             # 调用标准的 OneBot v11 API: send_group_msg
             logger.info(f"正在发送消息到群 {self.target_group}")
