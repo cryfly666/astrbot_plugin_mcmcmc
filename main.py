@@ -225,7 +225,12 @@ class MyPlugin(Star):
             return "❌ 无法连接到服务器"
         
         # Add status emoji based on server status
-        status_emoji = "🟢" if data.get('status') == 'online' else "🔴"
+        if data.get('status') == 'online':
+            status_emoji = "🟢"
+        elif data.get('status') == 'starting':
+            status_emoji = "🟡"
+        else:
+            status_emoji = "🔴"
         msg = [f"{status_emoji} 服务器: {data['name']}"]
         
         if data.get('motd'):
@@ -299,12 +304,12 @@ class MyPlugin(Star):
                 elif data is None:
                     # 获取失败时暂不处理，避免断网刷屏，仅日志
                     logger.debug("获取服务器数据失败")
-                elif data.get('status') == 'starting':
-                    # Server is starting
-                    logger.info(f"自动查询完成 - 服务器状态: 启动中")
                 else:
-                    # Server offline or other status
-                    logger.info(f"自动查询完成 - 服务器状态: {data.get('status', '未知')}")
+                    # Handle other server statuses
+                    if data.get('status') == 'starting':
+                        logger.info(f"自动查询完成 - 服务器状态: 启动中")
+                    else:
+                        logger.info(f"自动查询完成 - 服务器状态: {data.get('status', '未知')}")
                 
                 await asyncio.sleep(self.check_interval)
                 
