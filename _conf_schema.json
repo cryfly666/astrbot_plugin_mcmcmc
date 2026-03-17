@@ -2,32 +2,32 @@
   "target_group": {
     "description": "目标QQ群号",
     "type": "string",
-    "hint": "接收服务器监控消息的QQ群号",
+    "hint": "接收监控消息的QQ群号。多服务器时可用分号分隔对应各服务器的群号（如 123456;789012），若只填一个则所有服务器均使用该群号",
     "default": ""
   },
   "server_name": {
     "description": "服务器名称",
     "type": "string",
-    "hint": "服务器的显示名称（用于消息中显示）",
+    "hint": "服务器的显示名称。多服务器时用分号分隔（如 生存服;创造服），数量需与服务器IP数量一致",
     "default": "我的Minecraft服务器"
   },
   "server_ip": {
     "description": "Minecraft服务器IP地址",
-    "type": "string", 
-    "hint": "要监控的Minecraft服务器IP地址或域名",
+    "type": "string",
+    "hint": "要监控的Minecraft服务器IP地址或域名。多服务器时用分号分隔（如 mc1.example.com;mc2.example.com）",
     "default": ""
   },
   "server_port": {
     "description": "Minecraft服务器端口",
-    "type": "int",
-    "hint": "要监控的Minecraft服务器端口号（Java版默认25565）",
-    "default": 25565
+    "type": "string",
+    "hint": "要监控的Minecraft服务器端口号（Java版默认25565）。多服务器时用分号分隔（如 25565;25566），若只填一个则所有服务器均使用该端口",
+    "default": "25565"
   },
   "check_interval": {
     "description": "检查间隔（秒）",
-    "type": "int",
-    "hint": "每隔多少秒检查一次服务器状态",
-    "default": 10
+    "type": "string",
+    "hint": "每隔多少秒检查一次服务器状态。多服务器时用分号分隔（如 10;30），若只填一个则所有服务器均使用该间隔",
+    "default": "10"
   },
   "enable_auto_monitor": {
     "description": "自动启动监控",
