@@ -2,14 +2,14 @@
   "target_group": {
     "description": "目标QQ群号",
     "type": "string",
-    "hint": "接收监控消息的QQ群号。多服务器时可用分号分隔对应各服务器的群号（如 123456;789012），若只填一个则所有服务器均使用该群号",
+    "hint": "接收监控消息的QQ群号。多服务器时可用！英文！分号（下同）分隔对应各服务器的群号（如 123456;789012），若只填一个则所有服务器均使用该群号",
     "default": ""
   },
   "server_name": {
     "description": "服务器名称",
     "type": "string",
     "hint": "服务器的显示名称。多服务器时用分号分隔（如 生存服;创造服），数量需与服务器IP数量一致",
-    "default": "我的Minecraft服务器"
+    "default": "我的Minecraft服务器;"
   },
   "server_ip": {
     "description": "Minecraft服务器IP地址",
