@@ -77,7 +77,6 @@
 ### 状态缓存
 - `last_player_count`: 上次的玩家数量（None表示未初始化）
 - `last_player_list`: 上次的玩家列表
-
 使用 `/reset_monitor` 可以清除缓存，下次检测将视为首次检测。
 
 ## 技术特性
@@ -92,18 +91,7 @@
 
 ## 安装使用
 
-### 1. 安装插件
-将插件文件放入 AstrBot 插件目录：
-```
-data/plugins/服务器查询/
-├── main.py             # 主程序文件
-├── metadata.yaml       # 插件元数据
-├── _conf_schema.json   # 配置模式文件
-├── LICENSE             # 许可证文件
-└── README.md           # 说明文档
-```
-
-### 2. 配置插件
+### 1. 配置插件
 在 AstrBot WebUI 的插件配置页面设置以下参数：
 - **target_group**: 你的QQ群号
 - **server_ip**: Minecraft服务器IP
@@ -112,26 +100,19 @@ data/plugins/服务器查询/
 - **check_interval**: 检查间隔，建议10-60秒
 - **enable_auto_monitor**: 是否自动启动监控
 
-### 3. 启动监控
+### 2. 启动监控
 方式一：在配置中启用 `enable_auto_monitor`，插件加载后自动启动（延迟5秒）
 
 方式二：手动在群内发送 `/start_server_monitor` 指令启动
 
-### 4. 测试
+### 3. 测试
 使用 `/查询` 指令测试插件功能是否正常
 
-## API说明
 
-### Minecraft Server List Ping 协议
-插件使用 Minecraft Server List Ping 协议直接与服务器通信，无需依赖外部API。该协议是Minecraft官方协议的一部分。
 
 **支持说明**:
 - ✅ **Java版**: 完全支持，适用于原版及大多数服务端（Spigot, Paper, Fabric, Forge等）
 - ❌ **基岩版**: 暂不支持（基岩版使用不同的RakNet协议，计划在未来版本中添加支持）
-
-**数据格式**:
-- 通过Socket连接直接发送握手包和状态请求包
-- 服务器返回JSON格式的状态信息，包含版本、玩家数量、玩家列表等
 
 ### 一言API
 **请求URL**: `https://v1.hitokoto.cn/?encode=text`
@@ -139,35 +120,25 @@ data/plugins/服务器查询/
 返回纯文本格式的随机句子。
 
 ## 注意事项
-
-- ⚠️ 插件使用原生Socket协议与Minecraft服务器通信，确保服务器端口可访问
 - ⚠️ 确保配置的QQ群号正确且机器人已加入该群
 - ⚠️ 建议检查间隔不要设置过短，避免频繁查询服务器
-- ⚠️ 确保服务器防火墙放行了对应端口
+- ⚠️ 确保监控多服务器时填写时所用的分号为英文分号！
 
 ## 常见问题
 
-**Q: 为什么自动监控没有启动？**  
-A: 检查配置文件中 `target_group`、`server_ip`、`server_port` 是否都已配置，查看日志是否有错误提示。
-
-**Q: 如何清除监控状态？**  
-A: 使用 `/reset_monitor` 指令重置状态缓存。
-
 **Q: 消息没有发送到群里？**  
 A: 使用 `/查询` 测试，检查群号是否正确，机器人是否有发送权限。
-
-**Q: 如何更改监控的群？**  
-A: 使用 `/set_group <群号>` 指令动态修改，或在WebUI配置页面修改。
 
 **Q: 需要在 MC 服务器安装插件吗？**  
 A: 不需要。本插件通过 Minecraft Server List Ping 协议直接查询，适用于Java版原版及大多数服务端（Spigot, Paper, Fabric, Forge 等）。
 
 **Q: 支持基岩版服务器吗？**  
-A: 当前版本仅支持Java版服务器。基岩版使用不同的协议，支持计划在未来版本中添加。
+A: 当前版本仅支持Java版服务器。基岩版使用不同的协议，可使用此插件https://github.com/cryfly666/astrbot_plugin_apimcmc。
 
-**Q: 报错 "Connection refused"？**  
-A: 请检查 `server_ip` 和 `server_port` 是否正确，并确保服务器防火墙放行了对应端口。
+## 更新日志
 
+**2026年3月15日**  
+添加对多服务器监控的支持
 
 
 
