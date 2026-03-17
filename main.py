@@ -485,15 +485,13 @@ class MyPlugin(Star):
         if not self.servers:
             yield event.plain_result("❌ 没有已配置的服务器，请检查配置")
             return
-        parts = []
-        for s in self.servers:
-            data = await self._fetch_server_data(s)
-            parts.append(self._format_msg(data))
-        msg = "\n\n".join(parts)
         hito = await self.get_hitokoto()
-        if hito:
-            msg += f"\n\n💬 {hito}"
-        yield event.plain_result(msg)
+        for i, s in enumerate(self.servers):
+            data = await self._fetch_server_data(s)
+            msg = self._format_msg(data)
+            if hito and i == len(self.servers) - 1:
+                msg += f"\n\n💬 {hito}"
+            yield event.plain_result(msg)
 
     @filter.command("reset_monitor")
     async def cmd_reset(self, event: AstrMessageEvent):
