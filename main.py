@@ -13,38 +13,112 @@ class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
         self.config = config or {}
-        self.task = None
-        
-        # 配置处理
-        self.target_group = self.config.get("target_group")
-        if self.target_group and not str(self.target_group).isdigit():
-            logger.error(f"target_group '{self.target_group}' 不是有效数字")
-            self.target_group = None
 
-        self.server_name = self.config.get("server_name", "Minecraft服务器")
-        self.server_ip = self.config.get("server_ip")
-        self.server_port = self.config.get("server_port")
-        self.check_interval = int(self.config.get("check_interval", 10))
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
-        
-        # 缓存数据
-        self.last_player_count = None
-        self.last_player_list = []
-        
-        if not self.target_group or not self.server_ip or not self.server_port:
-            logger.error("配置不完整(target_group/ip/port)，监控无法启动")
+
+        # 解析多服务器配置
+        self.servers = self._parse_servers_config()
+
+        if not self.servers:
+            logger.error("配置不完整(server_ip/port/target_group)，监控无法启动")
             self.enable_auto_monitor = False
         else:
-            logger.info(f"MC监控已加载 | 服务器: {self.server_ip}:{self.server_port}")
-        
+            for s in self.servers:
+                logger.info(f"MC监控已加载 | 服务器: {s['ip']}:{s['port']} | 群: {s['group']} | 间隔: {s['interval']}s")
+
         if self.enable_auto_monitor:
             asyncio.create_task(self._delayed_auto_start())
 
+    # ------------------------------------------------------------------
+    # 配置解析
+    # ------------------------------------------------------------------
+
+    def _split_config(self, value):
+        """将配置值按分号分割，返回去空白后的列表；None / 空字符串返回空列表"""
+        if not value:
+            return []
+        return [v.strip() for v in str(value).split(";") if v.strip()]
+
+    def _parse_servers_config(self):
+        """根据配置构建服务器信息列表，支持多服务器（分号分隔）"""
+        ips = self._split_config(self.config.get("server_ip", ""))
+        if not ips:
+            return []
+
+        n = len(ips)
+
+        def expand(raw_list, default, label):
+            """将 raw_list 扩展到长度 n；若只有 1 个元素则广播；数量不匹配时使用 default"""
+            if len(raw_list) == n:
+                return raw_list
+            if len(raw_list) == 1:
+                return raw_list * n
+            if raw_list:
+                logger.warning(
+                    f"{label} 的数量({len(raw_list)})与服务器IP数量({n})不匹配，"
+                    f"将对所有服务器使用默认值: {default}"
+                )
+            return [str(default)] * n
+
+        raw_ports = self._split_config(self.config.get("server_port", "25565"))
+        if not raw_ports:
+            raw_ports = ["25565"]
+        ports = expand(raw_ports, "25565", "server_port")
+
+        raw_names = self._split_config(self.config.get("server_name", "Minecraft服务器"))
+        if not raw_names:
+            raw_names = ["Minecraft服务器"]
+        names = expand(raw_names, "Minecraft服务器", "server_name")
+
+        raw_groups = self._split_config(self.config.get("target_group", ""))
+        groups = expand(raw_groups, "", "target_group")
+
+        raw_intervals = self._split_config(self.config.get("check_interval", "10"))
+        if not raw_intervals:
+            raw_intervals = ["10"]
+        intervals = expand(raw_intervals, "10", "check_interval")
+
+        servers = []
+        for i in range(n):
+            group = groups[i]
+            if group and not group.isdigit():
+                logger.error(f"target_group '{group}' 不是有效数字，跳过服务器 {ips[i]}")
+                continue
+
+            port_str = ports[i]
+            port = int(port_str) if port_str.isdigit() else 25565
+
+            interval_str = intervals[i]
+            interval = int(interval_str) if interval_str.isdigit() else 10
+
+            servers.append({
+                'ip': ips[i],
+                'port': port,
+                'name': names[i],
+                'group': group,
+                'interval': interval,
+                # 运行时状态
+                'last_player_count': None,
+                'last_player_list': set(),
+                'task': None,
+            })
+
+        return servers
+
+    # ------------------------------------------------------------------
+    # 自动启动
+    # ------------------------------------------------------------------
+
     async def _delayed_auto_start(self):
         await asyncio.sleep(5)
-        if not self.task or self.task.done():
-            self.task = asyncio.create_task(self.monitor_task())
-            logger.info("🚀 自动启动服务器监控任务")
+        for s in self.servers:
+            if not s['task'] or s['task'].done():
+                s['task'] = asyncio.create_task(self.monitor_task(s))
+        logger.info(f"🚀 自动启动服务器监控任务（共 {len(self.servers)} 个服务器）")
+
+    # ------------------------------------------------------------------
+    # 工具方法
+    # ------------------------------------------------------------------
 
     async def get_hitokoto(self):
         """获取一言"""
@@ -60,11 +134,11 @@ class MyPlugin(Star):
         """解析玩家列表，返回名字列表"""
         if not players_data:
             return []
-        
+
         # 标准格式：列表包含字典 [{"name": "player1"}, ...]
         if isinstance(players_data, list):
             return [p.get("name", str(p)) if isinstance(p, dict) else str(p) for p in players_data]
-        
+
         return []
 
     def _pack_varint(self, val):
@@ -169,26 +243,30 @@ class MyPlugin(Star):
             except (ConnectionError, OSError, asyncio.CancelledError):
                 pass
 
-    async def _fetch_server_data(self):
+    async def _fetch_server_data(self, server):
         """获取Minecraft服务器数据（使用直接Socket连接）"""
-        if not self.server_ip or not self.server_port:
+        host = server['ip']
+        port = server['port']
+        name = server['name']
+
+        if not host or not port:
             return None
-        
+
         try:
-            data = await self._ping_server(self.server_ip, int(self.server_port))
+            data = await self._ping_server(host, int(port))
             logger.debug(f"MC Server raw data: {data}")
 
             if not data:
                 return {
                     'status': 'offline',
-                    'name': self.server_name,
+                    'name': name,
                     'version': '未知',
                     'online': 0,
                     'max': 0,
                     'player_names': [],
                     'motd': ''
                 }
-            
+
             # 检查是否为正常的服务器信息
             if "version" in data and "players" in data:
                 version = data.get("version", {}).get("name", "未知版本")
@@ -196,7 +274,7 @@ class MyPlugin(Star):
                 online_players = players_info.get("online", 0)
                 max_players = players_info.get("max", 0)
                 player_sample = players_info.get("sample", [])
-                
+
                 # 提取MOTD
                 motd_data = data.get("description", "")
                 if isinstance(motd_data, dict):
@@ -209,18 +287,18 @@ class MyPlugin(Star):
 
                 return {
                     'status': 'online',
-                    'name': self.server_name,
+                    'name': name,
                     'version': version,
                     'online': online_players,
                     'max': max_players,
                     'player_names': player_names,
                     'motd': motd
                 }
-            
+
             # 可能是启动中或其他状态
             return {
                 'status': 'starting',
-                'name': self.server_name,
+                'name': name,
                 'version': '启动中',
                 'online': 0,
                 'max': 0,
@@ -229,13 +307,13 @@ class MyPlugin(Star):
             }
 
         except Exception as e:
-            logger.error(f"获取服务器信息出错: {e}")
+            logger.error(f"获取服务器信息出错 ({host}:{port}): {e}")
             return None
 
     def _format_msg(self, data):
         if not data:
             return "❌ 无法连接到服务器"
-        
+
         # Add status emoji based on server status
         if data.get('status') == 'online':
             status_emoji = "🟢"
@@ -244,13 +322,13 @@ class MyPlugin(Star):
         else:
             status_emoji = "🔴"
         msg = [f"{status_emoji} 服务器: {data['name']}"]
-        
+
         if data.get('motd'):
             msg.append(f"📝 MOTD: {data['motd']}")
-            
+
         msg.append(f"🎮 版本: {data['version']}")
         msg.append(f"👥 在线玩家: {data['online']}")
-        
+
         # Only show player list section if there are players online
         if data.get('player_names') and data['online'] > 0:
             names = data['player_names']
@@ -258,163 +336,186 @@ class MyPlugin(Star):
             if len(names) > 10:
                 p_str += f" 等{len(names)}人"
             msg.append(f"📋 玩家列表: {p_str}")
-            
+
         return "\n".join(msg)
 
-    async def monitor_task(self):
-        """定时监控核心逻辑"""
+    async def monitor_task(self, server):
+        """定时监控核心逻辑（针对单个服务器）"""
         while True:
             try:
-                data = await self._fetch_server_data()
-                
+                data = await self._fetch_server_data(server)
+
                 if data and data['status'] == 'online':
                     curr_online = data['online']
                     curr_players = set(data['player_names'])
-                    
+
                     # 首次运行初始化
-                    if self.last_player_count is None:
-                        self.last_player_count = curr_online
-                        self.last_player_list = curr_players
-                        logger.info(f"监控初始化完成，当前在线: {curr_online}人")
+                    if server['last_player_count'] is None:
+                        server['last_player_count'] = curr_online
+                        server['last_player_list'] = curr_players
+                        logger.info(f"[{server['name']}] 监控初始化完成，当前在线: {curr_online}人")
                     else:
                         # 检测变化
                         changes = []
-                        last_players = self.last_player_list
-                        
+                        last_players = server['last_player_list']
+
                         joined = curr_players - last_players
                         left = last_players - curr_players
-                        
+
                         if joined:
                             changes.append(f"📈 {', '.join(joined)} 加入了服务器")
                         if left:
                             changes.append(f"📉 {', '.join(left)} 离开了服务器")
-                            
+
                         # 如果只有数量变化但获取不到具体名单（部分服务端特性）
-                        if not joined and not left and curr_online != self.last_player_count:
-                            diff = curr_online - self.last_player_count
+                        if not joined and not left and curr_online != server['last_player_count']:
+                            diff = curr_online - server['last_player_count']
                             symbol = "📈" if diff > 0 else "📉"
                             changes.append(f"{symbol} 在线人数变化: {diff:+d} (当前 {curr_online}人)")
 
                         if changes:
-                            logger.info(f"🔔 检测到变化: {changes}")
+                            logger.info(f"[{server['name']}] 🔔 检测到变化: {changes}")
                             # 构建完整消息
                             notify_msg = "🔔 状态变动:\n" + "\n".join(changes)
                             notify_msg += f"\n\n{self._format_msg(data)}"
-                            
+
                             hito = await self.get_hitokoto()
-                            if hito: notify_msg += f"\n\n💬 {hito}"
-                            
-                            logger.info(f"准备发送变动通知消息，长度: {len(notify_msg)} 字符")
-                            await self.send_group_msg(notify_msg)
-                        
+                            if hito:
+                                notify_msg += f"\n\n💬 {hito}"
+
+                            logger.info(f"[{server['name']}] 准备发送变动通知消息，长度: {len(notify_msg)} 字符")
+                            await self.send_group_msg(notify_msg, server['group'])
+
                         # Log status after each query cycle
-                        logger.info(f"自动查询完成 - 在线: {curr_online}人, 状态: 正常")
-                        
+                        logger.info(f"[{server['name']}] 自动查询完成 - 在线: {curr_online}人, 状态: 正常")
+
                         # 更新缓存
-                        self.last_player_count = curr_online
-                        self.last_player_list = curr_players
-                
+                        server['last_player_count'] = curr_online
+                        server['last_player_list'] = curr_players
+
                 elif data is None:
                     # 获取失败时暂不处理，避免断网刷屏，仅日志
-                    logger.debug("获取服务器数据失败")
+                    logger.debug(f"[{server['name']}] 获取服务器数据失败")
                 else:
                     # Handle other server statuses
                     if data.get('status') == 'starting':
-                        logger.info(f"自动查询完成 - 服务器状态: 启动中")
+                        logger.info(f"[{server['name']}] 自动查询完成 - 服务器状态: 启动中")
                     else:
-                        logger.info(f"自动查询完成 - 服务器状态: {data.get('status', '未知')}")
-                
-                await asyncio.sleep(self.check_interval)
-                
+                        logger.info(f"[{server['name']}] 自动查询完成 - 服务器状态: {data.get('status', '未知')}")
+
+                await asyncio.sleep(server['interval'])
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"监控循环异常: {e}")
+                logger.error(f"[{server['name']}] 监控循环异常: {e}")
                 await asyncio.sleep(5)
 
-    async def send_group_msg(self, text):
+    async def send_group_msg(self, text, group):
         """
         主动发送消息到指定 QQ 群
         :param text: 要发送的消息内容
+        :param group: 目标群号（字符串或整数）
         """
-        if not self.target_group:
+        if not group:
             logger.warning("消息发送失败: target_group 未配置")
             return
         try:
             # 从插件上下文中获取 AIOCQHTTP (OneBot) 平台适配器
             platform = self.context.get_platform(PlatformAdapterType.AIOCQHTTP)
-            
+
             if not platform:
                 logger.error("未找到 AIOCQHTTP 平台适配器，无法发送消息")
                 return
 
             # 获取底层的 API 客户端
             client = platform.get_client()
-            
+
             if not client:
                 logger.error("无法获取 AIOCQHTTP 客户端，无法发送消息")
                 return
-            
+
             # 调用标准的 OneBot v11 API: send_group_msg
-            logger.info(f"正在发送消息到群 {self.target_group}")
+            logger.info(f"正在发送消息到群 {group}")
             await client.api.call_action('send_group_msg', **{
-                'group_id': int(self.target_group),
+                'group_id': int(group),
                 'message': text
             })
-            logger.info(f"✅ 消息已发送到群 {self.target_group}")
+            logger.info(f"✅ 消息已发送到群 {group}")
         except Exception as e:
-            logger.error(f"❌ 消息发送失败到群 {self.target_group}: {type(e).__name__}: {e}")
+            logger.error(f"❌ 消息发送失败到群 {group}: {type(e).__name__}: {e}")
             logger.error(f"详细错误信息:\n{traceback.format_exc()}")
 
     # --- 指令区域 ---
 
     @filter.command("start_server_monitor")
     async def cmd_start(self, event: AstrMessageEvent):
-        if self.task and not self.task.done():
-            yield event.plain_result("⚠️ 监控已在运行中")
-        else:
-            self.task = asyncio.create_task(self.monitor_task())
-            yield event.plain_result(f"✅ 监控已启动 (间隔{self.check_interval}s)")
+        if not self.servers:
+            yield event.plain_result("❌ 没有已配置的服务器，请检查配置")
+            return
+        started = []
+        already_running = []
+        for s in self.servers:
+            if s['task'] and not s['task'].done():
+                already_running.append(s['name'])
+            else:
+                s['task'] = asyncio.create_task(self.monitor_task(s))
+                started.append(s['name'])
+        parts = []
+        if started:
+            parts.append(f"✅ 已启动监控: {', '.join(started)}")
+        if already_running:
+            parts.append(f"⚠️ 已在运行中: {', '.join(already_running)}")
+        yield event.plain_result("\n".join(parts))
 
     @filter.command("stop_server_monitor")
     async def cmd_stop(self, event: AstrMessageEvent):
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            self.task = None
-        yield event.plain_result("🛑 监控已停止")
+        for s in self.servers:
+            if s['task']:
+                s['task'].cancel()
+                try:
+                    await s['task']
+                except asyncio.CancelledError:
+                    pass
+                s['task'] = None
+        yield event.plain_result("🛑 所有服务器监控已停止")
 
     @filter.command("查询")
     async def cmd_query(self, event: AstrMessageEvent):
-        data = await self._fetch_server_data()
-        msg = self._format_msg(data)
+        if not self.servers:
+            yield event.plain_result("❌ 没有已配置的服务器，请检查配置")
+            return
+        parts = []
+        for s in self.servers:
+            data = await self._fetch_server_data(s)
+            parts.append(self._format_msg(data))
+        msg = "\n\n".join(parts)
         hito = await self.get_hitokoto()
-        if hito: msg += f"\n\n💬 {hito}"
+        if hito:
+            msg += f"\n\n💬 {hito}"
         yield event.plain_result(msg)
 
     @filter.command("reset_monitor")
     async def cmd_reset(self, event: AstrMessageEvent):
-        self.last_player_count = None
-        self.last_player_list = []
+        for s in self.servers:
+            s['last_player_count'] = None
+            s['last_player_list'] = set()
         yield event.plain_result("🔄 缓存已重置，下次检测将视为首次")
 
     @filter.command("set_group")
     async def cmd_setgroup(self, event: AstrMessageEvent, group_id: str):
         if group_id.isdigit():
-            self.target_group = group_id
-            yield event.plain_result(f"✅ 目标群已设为: {group_id}")
+            for s in self.servers:
+                s['group'] = group_id
+            yield event.plain_result(f"✅ 所有服务器的目标群已设为: {group_id}")
         else:
             yield event.plain_result("❌ 群号必须为纯数字")
 
     async def terminate(self):
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-
-
+        for s in self.servers:
+            if s['task']:
+                s['task'].cancel()
+                try:
+                    await s['task']
+                except asyncio.CancelledError:
+                    pass
