@@ -15,6 +15,7 @@ class MyPlugin(Star):
         self.config = config or {}
 
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
+        self.monitor_count_only = self.config.get("monitor_count_only", False)
 
         # 解析多服务器配置
         self.servers = self._parse_servers_config()
@@ -357,21 +358,29 @@ class MyPlugin(Star):
                     else:
                         # 检测变化
                         changes = []
-                        last_players = server['last_player_list']
 
-                        joined = curr_players - last_players
-                        left = last_players - curr_players
+                        if self.monitor_count_only:
+                            # 仅监控人数变化模式
+                            if curr_online != server['last_player_count']:
+                                diff = curr_online - server['last_player_count']
+                                symbol = "📈" if diff > 0 else "📉"
+                                changes.append(f"{symbol} 在线人数变化: {diff:+d} (当前 {curr_online}人)")
+                        else:
+                            last_players = server['last_player_list']
 
-                        if joined:
-                            changes.append(f"📈 {', '.join(joined)} 加入了服务器")
-                        if left:
-                            changes.append(f"📉 {', '.join(left)} 离开了服务器")
+                            joined = curr_players - last_players
+                            left = last_players - curr_players
 
-                        # 如果只有数量变化但获取不到具体名单（部分服务端特性）
-                        if not joined and not left and curr_online != server['last_player_count']:
-                            diff = curr_online - server['last_player_count']
-                            symbol = "📈" if diff > 0 else "📉"
-                            changes.append(f"{symbol} 在线人数变化: {diff:+d} (当前 {curr_online}人)")
+                            if joined:
+                                changes.append(f"📈 {', '.join(joined)} 加入了服务器")
+                            if left:
+                                changes.append(f"📉 {', '.join(left)} 离开了服务器")
+
+                            # 如果只有数量变化但获取不到具体名单（部分服务端特性）
+                            if not joined and not left and curr_online != server['last_player_count']:
+                                diff = curr_online - server['last_player_count']
+                                symbol = "📈" if diff > 0 else "📉"
+                                changes.append(f"{symbol} 在线人数变化: {diff:+d} (当前 {curr_online}人)")
 
                         if changes:
                             logger.info(f"[{server['name']}] 🔔 检测到变化: {changes}")

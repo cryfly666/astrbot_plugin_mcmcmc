@@ -34,5 +34,11 @@
     "type": "bool",
     "hint": "插件加载时是否自动开始监控服务器状态",
     "default": false
+  },
+  "monitor_count_only": {
+    "description": "仅监控人数变化",
+    "type": "bool",
+    "hint": "开启后监控功能只检测在线人数变化，不检测具体玩家加入/离开（适用于某些版本服务器玩家名显示异常的情况）。默认关闭。查询功能不受此开关影响。",
+    "default": false
   }
 }
