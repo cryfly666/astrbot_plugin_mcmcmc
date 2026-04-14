@@ -79,37 +79,6 @@
 - `last_player_list`: 上次的玩家列表
 使用 `/reset_monitor` 可以清除缓存，下次检测将视为首次检测。
 
-## 技术特性
-
-- **异步架构**: 基于 `asyncio` 和 `aiohttp`，性能优异
-- **直接连接**: 使用Minecraft Server List Ping协议直接与服务器通信，无需外部API
-- **零依赖**: 无需在服务端安装插件或配置RCON，适用于原版及大多数服务端（Spigot, Paper, Fabric, Forge等）
-- **直接推送**: 通过 AIOCQHTTP 客户端的 `send_group_msg` 接口直接发送群消息
-- **错误处理**: 完整的异常处理和超时机制（连接超时5秒）
-- **日志系统**: 详细的日志记录，便于调试和监控
-- **状态管理**: 智能的状态缓存机制，避免重复通知
-
-## 安装使用
-
-### 1. 配置插件
-在 AstrBot WebUI 的插件配置页面设置以下参数：
-- **target_group**: 你的QQ群号
-- **server_ip**: Minecraft服务器IP
-- **server_port**: 服务器端口（Java版默认25565）
-- **server_name**: 自定义服务器名称（可选）
-- **check_interval**: 检查间隔，建议10-60秒
-- **enable_auto_monitor**: 是否自动启动监控
-
-### 2. 启动监控
-方式一：在配置中启用 `enable_auto_monitor`，插件加载后自动启动（延迟5秒）
-
-方式二：手动在群内发送 `/start_server_monitor` 指令启动
-
-### 3. 测试
-使用 `/查询` 指令测试插件功能是否正常
-
-
-
 **支持说明**:
 - ✅ **Java版**: 完全支持，适用于原版及大多数服务端（Spigot, Paper, Fabric, Forge等）
 - ❌ **基岩版**: 暂不支持（基岩版使用不同的RakNet协议，计划在未来版本中添加支持）
