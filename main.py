@@ -16,6 +16,7 @@ class MyPlugin(Star):
 
         self.enable_auto_monitor = self.config.get("enable_auto_monitor", False)
         self.monitor_count_only = self.config.get("monitor_count_only", False)
+        self.enable_hitokoto = self.config.get("enable_hitokoto", True)
 
         # 解析多服务器配置
         self.servers = self._parse_servers_config()
@@ -388,9 +389,10 @@ class MyPlugin(Star):
                             notify_msg = "🔔 状态变动:\n" + "\n".join(changes)
                             notify_msg += f"\n\n{self._format_msg(data)}"
 
-                            hito = await self.get_hitokoto()
-                            if hito:
-                                notify_msg += f"\n\n💬 {hito}"
+                            if self.enable_hitokoto:
+                                hito = await self.get_hitokoto()
+                                if hito:
+                                    notify_msg += f"\n\n💬 {hito}"
 
                             logger.info(f"[{server['name']}] 准备发送变动通知消息，长度: {len(notify_msg)} 字符")
                             await self.send_group_msg(notify_msg, server['group'])
@@ -494,7 +496,7 @@ class MyPlugin(Star):
         if not self.servers:
             yield event.plain_result("❌ 没有已配置的服务器，请检查配置")
             return
-        hito = await self.get_hitokoto()
+        hito = await self.get_hitokoto() if self.enable_hitokoto else None
         for i, s in enumerate(self.servers):
             data = await self._fetch_server_data(s)
             msg = self._format_msg(data)

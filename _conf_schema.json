@@ -40,5 +40,11 @@
     "type": "bool",
     "hint": "开启后监控功能只检测在线人数变化，不检测具体玩家加入/离开（适用于某些版本服务器玩家名显示异常的情况）。默认关闭。查询功能不受此开关影响。",
     "default": false
+  },
+  "enable_hitokoto": {
+    "description": "每日一言",
+    "type": "bool",
+    "hint": "开启后在状态变动通知和查询结果末尾附带一条一言（hitokoto）。默认开启。",
+    "default": true
   }
 }
